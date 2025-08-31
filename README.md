@@ -66,6 +66,35 @@ With proper optimization, you should be able to achieve:
 
 Try to optimize this code while maintaining the same functionality. See how much you can improve the execution time and memory usage!
 
+## How to Request Claude Optimization
+
+This repository is set up to work with Claude Code for automated optimization responses:
+
+### Option 1: GitHub Issues (Automated Response)
+1. Go to the [Issues tab](https://github.com/benstanbury/claude-practice-simple/issues)
+2. Create a new issue describing the optimization you want
+3. Include `@claude` anywhere in your issue description
+4. The GitHub Action will automatically respond and can process the request
+
+### Option 2: Local Development
+1. Clone this repository locally
+2. Use Claude Code CLI to work on optimizations
+3. Submit pull requests with improvements
+
+### Example Issue Format
+```
+Title: Optimize bubble sort algorithm
+
+Description: 
+@claude Please optimize the bubble sort implementation in the `slow_number_processor()` function. 
+The current implementation is O(n²) and could be improved to O(n log n) using built-in sorting.
+
+Expected improvements:
+- Better time complexity
+- Cleaner code
+- Maintain same functionality
+```
+
 ## License
 
 This project is for educational purposes. Feel free to use it for learning and practice.

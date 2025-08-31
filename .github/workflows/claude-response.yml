@@ -1,0 +1,61 @@
+name: Claude Issue Response
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+
+jobs:
+  claude-response:
+    if: contains(github.event.issue.body, '@claude') || contains(github.event.comment.body, '@claude')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Claude Code
+      run: |
+        # This would need to be configured with actual Claude Code setup
+        # For now, this is a placeholder workflow that demonstrates the structure
+        echo "Claude Code integration would be set up here"
+        
+    - name: Process Claude Request
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+        ISSUE_BODY: ${{ github.event.issue.body }}
+        COMMENT_BODY: ${{ github.event.comment.body }}
+      run: |
+        echo "Processing Claude request for issue #${ISSUE_NUMBER}"
+        echo "Title: ${ISSUE_TITLE}"
+        
+        # Placeholder for Claude Code integration
+        # This would parse the issue/comment and invoke Claude Code
+        echo "This workflow is set up but requires Claude Code API integration"
+        
+    - name: Comment Response
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const issueNumber = context.issue.number;
+          const comment = `👋 Hi! I see you've tagged @claude. 
+          
+          This GitHub Actions workflow is set up to respond to Claude mentions, but requires proper Claude Code API integration to function.
+          
+          For now, you can:
+          1. Clone this repository locally
+          2. Use Claude Code CLI to address the optimization requests
+          3. Submit pull requests with the improvements
+          
+          Issue: #${issueNumber}
+          Repository: ${context.repo.owner}/${context.repo.repo}`;
+          
+          github.rest.issues.createComment({
+            issue_number: issueNumber,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
