@@ -48,13 +48,22 @@ jobs:
         
         async function processRequest() {
           try {
+            if (!process.env.ANTHROPIC_API_KEY) {
+              console.log("CLAUDE_RESPONSE:❌ ANTHROPIC_API_KEY secret is not configured. Please add it in repository settings > Secrets and variables > Actions.");
+              return;
+            }
+            
             const issueBody = process.env.ISSUE_BODY;
             const issueTitle = process.env.ISSUE_TITLE;
             const issueNumber = process.env.ISSUE_NUMBER;
             
             // Read the current code files
-            const mainPy = fs.readFileSync('main.py', 'utf8');
-            const readme = fs.readFileSync('README.md', 'utf8');
+            let mainPy = '';
+            try {
+              mainPy = fs.readFileSync('main.py', 'utf8');
+            } catch (e) {
+              console.log('Could not read main.py:', e.message);
+            }
             
             const prompt = `You are Claude, an AI assistant helping with code optimization. A user has created a GitHub issue requesting help.
             
@@ -79,10 +88,15 @@ jobs:
               }]
             });
             
-            console.log("CLAUDE_RESPONSE:" + message.content[0].text);
+            const response = message.content[0].text;
+            console.log("CLAUDE_RESPONSE:" + response);
+            
+            // Write response to file for next step
+            fs.writeFileSync('claude_response.txt', response);
+            
           } catch (error) {
             console.error('Error calling Claude API:', error);
-            console.log("CLAUDE_RESPONSE:Sorry, I encountered an error processing your request. Please make sure the ANTHROPIC_API_KEY secret is properly configured in the repository settings.");
+            console.log("CLAUDE_RESPONSE:Sorry, I encountered an error processing your request: " + error.message);
           }
         }
         
@@ -93,35 +107,49 @@ jobs:
         
     - name: Post Claude Response
       uses: actions/github-script@v7
-      env:
-        CLAUDE_RESPONSE: ${{ env.CLAUDE_RESPONSE }}
       with:
         script: |
-          const { execSync } = require('child_process');
+          const fs = require('fs');
           
-          // Get Claude's response from the previous step
-          const output = execSync('node claude_processor.js', { encoding: 'utf8' });
-          const claudeResponse = output.split('CLAUDE_RESPONSE:')[1]?.trim();
-          
-          if (claudeResponse) {
-            const comment = `🤖 **Claude Response:**
-        
-        ${claudeResponse}
-        
-        ---
-        *This response was generated automatically by Claude via GitHub Actions.*`;
+          try {
+            // Read Claude's response from file
+            let claudeResponse = '';
+            try {
+              claudeResponse = fs.readFileSync('claude_response.txt', 'utf8');
+            } catch (e) {
+              console.log('No response file found, checking console output');
+              // Fallback - this might not work reliably
+              claudeResponse = 'Failed to get Claude response. Please check the workflow logs.';
+            }
             
+            if (claudeResponse && claudeResponse.trim()) {
+              const comment = `🤖 **Claude Response:**
+
+${claudeResponse}
+
+---
+*This response was generated automatically by Claude via GitHub Actions.*`;
+              
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: "❌ Failed to get response from Claude. Please check the ANTHROPIC_API_KEY secret configuration and workflow logs."
+              });
+            }
+          } catch (error) {
+            console.error('Error posting comment:', error);
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: comment
-            });
-          } else {
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: "❌ Failed to get response from Claude. Please check the ANTHROPIC_API_KEY secret configuration."
+              body: "❌ Error posting Claude response: " + error.message
             });
           }
