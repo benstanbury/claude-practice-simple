@@ -68,13 +68,19 @@ Try to optimize this code while maintaining the same functionality. See how much
 
 ## How to Request Claude Optimization
 
-This repository is set up to work with Claude Code for automated optimization responses:
+This repository is set up with Claude API integration for automated optimization responses:
+
+### Setup Required
+To enable Claude responses, you need to add your Anthropic API key:
+1. Go to [Repository Settings > Secrets and variables > Actions](https://github.com/benstanbury/claude-practice-simple/settings/secrets/actions)
+2. Add a new repository secret named `ANTHROPIC_API_KEY`
+3. Set the value to your Anthropic API key
 
 ### Option 1: GitHub Issues (Automated Response)
 1. Go to the [Issues tab](https://github.com/benstanbury/claude-practice-simple/issues)
 2. Create a new issue describing the optimization you want
 3. Include `@claude` anywhere in your issue description
-4. The GitHub Action will automatically respond and can process the request
+4. Claude will automatically respond with suggestions and optimized code
 
 ### Option 2: Local Development
 1. Clone this repository locally

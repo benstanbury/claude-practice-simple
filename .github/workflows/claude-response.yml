@@ -15,47 +15,108 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
-    - name: Setup Claude Code
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
       run: |
-        # This would need to be configured with actual Claude Code setup
-        # For now, this is a placeholder workflow that demonstrates the structure
-        echo "Claude Code integration would be set up here"
+        npm init -y
+        npm install @anthropic-ai/sdk
         
     - name: Process Claude Request
       env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         ISSUE_TITLE: ${{ github.event.issue.title }}
-        ISSUE_BODY: ${{ github.event.issue.body }}
-        COMMENT_BODY: ${{ github.event.comment.body }}
+        ISSUE_BODY: ${{ github.event.issue.body || github.event.comment.body }}
       run: |
-        echo "Processing Claude request for issue #${ISSUE_NUMBER}"
-        echo "Title: ${ISSUE_TITLE}"
+        cat > claude_processor.js << 'EOF'
+        const Anthropic = require('@anthropic-ai/sdk');
+        const fs = require('fs');
         
-        # Placeholder for Claude Code integration
-        # This would parse the issue/comment and invoke Claude Code
-        echo "This workflow is set up but requires Claude Code API integration"
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY,
+        });
         
-    - name: Comment Response
+        async function processRequest() {
+          try {
+            const issueBody = process.env.ISSUE_BODY;
+            const issueTitle = process.env.ISSUE_TITLE;
+            const issueNumber = process.env.ISSUE_NUMBER;
+            
+            // Read the current code files
+            const mainPy = fs.readFileSync('main.py', 'utf8');
+            const readme = fs.readFileSync('README.md', 'utf8');
+            
+            const prompt = `You are Claude, an AI assistant helping with code optimization. A user has created a GitHub issue requesting help.
+            
+        Issue Title: ${issueTitle}
+        Issue Description: ${issueBody}
+        
+        Current main.py content:
+        \`\`\`python
+        ${mainPy}
+        \`\`\`
+        
+        Please analyze the request and provide a helpful response. If they're asking for code optimization, suggest specific improvements. If they want you to make changes, provide the optimized code.
+        
+        Keep your response concise and actionable. Format code suggestions in proper markdown code blocks.`;
+        
+            const message = await anthropic.messages.create({
+              model: "claude-3-5-sonnet-20241022",
+              max_tokens: 2000,
+              messages: [{
+                role: "user",
+                content: prompt
+              }]
+            });
+            
+            console.log("CLAUDE_RESPONSE:" + message.content[0].text);
+          } catch (error) {
+            console.error('Error calling Claude API:', error);
+            console.log("CLAUDE_RESPONSE:Sorry, I encountered an error processing your request. Please make sure the ANTHROPIC_API_KEY secret is properly configured in the repository settings.");
+          }
+        }
+        
+        processRequest();
+        EOF
+        
+        node claude_processor.js
+        
+    - name: Post Claude Response
       uses: actions/github-script@v7
+      env:
+        CLAUDE_RESPONSE: ${{ env.CLAUDE_RESPONSE }}
       with:
         script: |
-          const issueNumber = context.issue.number;
-          const comment = `👋 Hi! I see you've tagged @claude. 
+          const { execSync } = require('child_process');
           
-          This GitHub Actions workflow is set up to respond to Claude mentions, but requires proper Claude Code API integration to function.
+          // Get Claude's response from the previous step
+          const output = execSync('node claude_processor.js', { encoding: 'utf8' });
+          const claudeResponse = output.split('CLAUDE_RESPONSE:')[1]?.trim();
           
-          For now, you can:
-          1. Clone this repository locally
-          2. Use Claude Code CLI to address the optimization requests
-          3. Submit pull requests with the improvements
-          
-          Issue: #${issueNumber}
-          Repository: ${context.repo.owner}/${context.repo.repo}`;
-          
-          github.rest.issues.createComment({
-            issue_number: issueNumber,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });
+          if (claudeResponse) {
+            const comment = `🤖 **Claude Response:**
+        
+        ${claudeResponse}
+        
+        ---
+        *This response was generated automatically by Claude via GitHub Actions.*`;
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+          } else {
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "❌ Failed to get response from Claude. Please check the ANTHROPIC_API_KEY secret configuration."
+            });
+          }
