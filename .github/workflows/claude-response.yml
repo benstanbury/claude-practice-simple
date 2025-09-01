@@ -153,12 +153,7 @@ jobs:
               }
               
               if (response.trim()) {
-                const comment = `🤖 **Claude Assistant:**
-
-${response}
-
----
-*Powered by Claude API via GitHub Actions*`;
+                const comment = '🤖 **Claude Assistant:**\n\n' + response + '\n\n---\n*Powered by Claude API via GitHub Actions*';
                 
                 const issueNumber = context.issue?.number || 
                   (context.payload.issue ? context.payload.issue.number : null);
