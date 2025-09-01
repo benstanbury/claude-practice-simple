@@ -1,0 +1,199 @@
+name: Claude Issue Assistant
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  claude-assistant:
+    # Only run if @claude is mentioned in issue body or comment
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
+      - name: Install Claude SDK
+        run: npm install @anthropic-ai/sdk
+        
+      - name: Process Claude Request
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > process_request.js << 'EOF'
+          const Anthropic = require('@anthropic-ai/sdk');
+          const { execSync } = require('child_process');
+          
+          async function main() {
+            try {
+              // Check if API key is configured
+              if (!process.env.ANTHROPIC_API_KEY) {
+                console.log('ERROR: ANTHROPIC_API_KEY secret not configured');
+                process.exit(1);
+              }
+              
+              const anthropic = new Anthropic({
+                apiKey: process.env.ANTHROPIC_API_KEY
+              });
+              
+              // Get issue/comment details from GitHub event
+              const eventPayload = JSON.parse(process.env.GITHUB_EVENT_PATH ? 
+                require('fs').readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8') : '{}');
+              
+              let issueNumber, issueTitle, requestText, isComment = false;
+              
+              if (eventPayload.issue) {
+                issueNumber = eventPayload.issue.number;
+                issueTitle = eventPayload.issue.title;
+                
+                if (eventPayload.comment) {
+                  // This is a comment on an issue
+                  requestText = eventPayload.comment.body;
+                  isComment = true;
+                } else {
+                  // This is an issue creation/edit
+                  requestText = eventPayload.issue.body;
+                }
+              }
+              
+              if (!issueNumber || !requestText || !requestText.includes('@claude')) {
+                console.log('No valid Claude request found');
+                process.exit(0);
+              }
+              
+              // Read project files for context
+              let projectContext = '';
+              try {
+                const files = execSync('find . -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.md" | grep -v node_modules | head -10', 
+                  { encoding: 'utf8' }).trim().split('\n');
+                
+                for (const file of files) {
+                  if (file && file.length > 0) {
+                    try {
+                      const content = require('fs').readFileSync(file, 'utf8');
+                      projectContext += `\n\n--- ${file} ---\n${content.slice(0, 2000)}`;
+                    } catch (e) {
+                      // Skip files we can't read
+                    }
+                  }
+                }
+              } catch (e) {
+                console.log('Could not read project files:', e.message);
+              }
+              
+              // Create prompt for Claude
+              const prompt = `You are Claude, an AI assistant helping with a GitHub issue. A user has mentioned @claude in their ${isComment ? 'comment' : 'issue'}.
+
+              Issue Title: ${issueTitle}
+              ${isComment ? 'Comment' : 'Issue'} Content: ${requestText}
+              
+              Project Context:${projectContext}
+              
+              Please provide a helpful response addressing their request. If they're asking for code changes, provide specific suggestions with code examples. If they want explanations, be thorough but concise. Format your response in GitHub-flavored markdown.
+              
+              Keep your response focused and actionable. If you suggest code changes, explain why the changes are beneficial.`;
+              
+              // Call Claude API
+              const response = await anthropic.messages.create({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 4000,
+                messages: [{
+                  role: 'user',
+                  content: prompt
+                }]
+              });
+              
+              const claudeResponse = response.content[0].text;
+              
+              // Save response to environment variable for next step
+              require('fs').writeFileSync('/tmp/claude_response.txt', claudeResponse);
+              console.log('Claude response generated successfully');
+              
+            } catch (error) {
+              console.error('Error:', error.message);
+              require('fs').writeFileSync('/tmp/claude_response.txt', 
+                `❌ **Error generating response:** ${error.message}\n\nPlease check your ANTHROPIC_API_KEY configuration.`);
+            }
+          }
+          
+          main();
+          EOF
+          
+          GITHUB_EVENT_PATH="${{ github.event_path }}" node process_request.js
+          
+      - name: Post Claude Response
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            try {
+              // Read Claude's response
+              let response = '';
+              try {
+                response = fs.readFileSync('/tmp/claude_response.txt', 'utf8');
+              } catch (e) {
+                response = '❌ Failed to read Claude response. Check workflow logs.';
+              }
+              
+              if (response.trim()) {
+                const comment = `🤖 **Claude Assistant:**
+
+${response}
+
+---
+*Powered by Claude API via GitHub Actions*`;
+                
+                const issueNumber = context.issue?.number || 
+                  (context.payload.issue ? context.payload.issue.number : null);
+                
+                if (issueNumber) {
+                  await github.rest.issues.createComment({
+                    issue_number: issueNumber,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: comment
+                  });
+                  
+                  console.log(`Posted Claude response to issue #${issueNumber}`);
+                } else {
+                  console.error('Could not determine issue number');
+                }
+              }
+              
+            } catch (error) {
+              console.error('Error posting comment:', error);
+              
+              // Try to post error message
+              try {
+                const issueNumber = context.issue?.number || 
+                  (context.payload.issue ? context.payload.issue.number : null);
+                  
+                if (issueNumber) {
+                  await github.rest.issues.createComment({
+                    issue_number: issueNumber,
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    body: `❌ **Claude Assistant Error:** ${error.message}`
+                  });
+                }
+              } catch (e) {
+                console.error('Failed to post error message:', e);
+              }
+            }
